@@ -1,0 +1,90 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<mule xmlns:batch="http://www.mulesoft.org/schema/mule/batch" xmlns:os="http://www.mulesoft.org/schema/mule/os"
+	xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core"
+	xmlns:http="http://www.mulesoft.org/schema/mule/http" xmlns="http://www.mulesoft.org/schema/mule/core" xmlns:doc="http://www.mulesoft.org/schema/mule/documentation" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
+http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd
+http://www.mulesoft.org/schema/mule/os http://www.mulesoft.org/schema/mule/os/current/mule-os.xsd
+http://www.mulesoft.org/schema/mule/batch http://www.mulesoft.org/schema/mule/batch/current/mule-batch.xsd">
+	<http:listener-config name="HTTP_Listener_config" doc:name="HTTP Listener config" doc:id="029b2186-3e37-46c7-ae08-105c830f2272" >
+		<http:listener-connection host="0.0.0.0" port="8081" />
+	</http:listener-config>
+	<http:request-config name="HTTP_Request_configuration" doc:name="HTTP Request configuration" doc:id="e6d8721f-2cb6-42aa-b058-f1f2624de308" basePath="/v1/public" >
+		<http:request-connection host="gateway.marvel.com" port="443" protocol="HTTPS"/>
+	</http:request-config>
+	<os:object-store name="Object_store" doc:name="Object store" doc:id="2c9cf2fa-7873-4857-8860-6be647425db9" />
+	<flow name="api_marvelmanylootsFlow" doc:id="6d392d0e-2ea0-4bad-868f-0f13b9b3baf6" >
+		<http:listener doc:name="Listener" doc:id="653a72d5-5cd0-4112-afbf-a64dfd193465" config-ref="HTTP_Listener_config" path="/api"/>
+		<set-variable value="#[0]" doc:name="Set Variable" doc:id="b4608260-5491-47a4-9b4e-45bc2c7a9d36" variableName="number_count"/>
+		<os:clear doc:name="Clear" doc:id="15338d8a-6e2d-4d85-9fc6-b8aff4b45e22" objectStore="Object_store" />
+		<flow-ref doc:name="Flow Reference" doc:id="454aec97-f5bc-4c59-a12b-78c7471b6859" name="api_marvelmanylootsSub_Flow"/>
+	</flow>
+	<sub-flow name="api_marvelmanylootsSub_Flow" doc:id="dd62f8b6-fd27-488b-8c6b-1ebf5d9b98f2" >
+		<http:request method="GET" doc:name="GET ID Series" doc:id="a7295060-ab0f-4dbf-be50-c6592fe6cd6b" config-ref="HTTP_Request_configuration" path="/series">
+			<http:query-params><![CDATA[#[output application/java
+---
+{
+	apikey : "7eae180d508f796ba9ec8bd0c5c0242f",
+	hash : "2da53be4837444df45549c3449ca3574",
+	limit: 100,
+	offset: vars.number_count,
+	ts : 1
+}]]]></http:query-params>
+		</http:request>
+		<set-variable value="#[payload.data.total]" doc:name="Total de Registros" doc:id="95ea1ae8-9bb6-4be5-af5f-9c66f87dc5ab" variableName="total"/>
+		<ee:transform doc:name="Transform Message" doc:id="81907791-4745-4aec-9ad2-c6293f464439">
+			<ee:message>
+				<ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+payload.data.results map ((item, index) -> {
+    id: item.id,
+    title: item.title
+})]]></ee:set-payload>
+			</ee:message>
+		</ee:transform>
+		<foreach doc:name="For Each" doc:id="bc31ce8a-aba1-4fe0-8d67-f71f44c25002" collection="#[payload]">
+			<set-variable value="#[payload.id]" doc:name="ID serie" doc:id="8a20ed81-15ed-4495-8230-a539ce563fb7" variableName="number_IdStory"/>
+			<http:request method="GET" doc:name="GET title e creators" doc:id="af9e0489-86d9-4fac-974f-48bdf456ffd1" config-ref="HTTP_Request_configuration" path='#["/series/$(vars.number_IdStory)/stories"]' target="request_serie_id">
+							<http:query-params><![CDATA[#[output application/java
+---
+{
+	apikey : "7eae180d508f796ba9ec8bd0c5c0242f",
+	hash : "2da53be4837444df45549c3449ca3574",
+	ts : 1
+}]]]></http:query-params>
+						</http:request>
+			<os:store doc:name="Store " doc:id="d94f7631-e5f7-47f8-976a-5f472c067dbc" key="#[payload.id]" objectStore="Object_store">
+				<os:value ><![CDATA[#[%dw 2.0
+output application/java
+---
+vars.request_serie_id.data.results map  ((item, index) -> (item.id): {
+    Creators: item.creators.items.name,
+    title: item.title,
+} )]]]></os:value>
+			</os:store>
+			<logger level="INFO" doc:name="Logger" doc:id="6c3a2bbf-b38e-4f43-8932-214e8fe36f3b" />
+		</foreach>
+		<set-variable value="#[%dw 2.0&#10;output application/json&#10;---&#10;sum([payload.data.count, payload.data.offset])]" doc:name="resgistros que faltam" doc:id="df8b05b3-b23f-47c8-a9c9-78652bf8074d" variableName="number_count" />
+		<choice doc:name="Choice" doc:id="3594c586-cc8e-4426-a2b3-b6d54e274423" >
+			<when expression="#[vars.number_count &lt;= vars.total]">
+				<flow-ref doc:name="Flow Reference" doc:id="bdb1681e-dd71-499a-848e-35aed2ab90ff" name="api_marvelmanylootsSub_Flow"/>
+			</when>
+			<otherwise >
+				<logger level="INFO" doc:name="Logger" doc:id="75ca6228-dd14-45e4-9b64-cacc5fe26d18" />
+			</otherwise>
+		</choice>
+		<os:retrieve-all doc:name="Retrieve all" doc:id="e66a775a-42e6-4959-a991-0cd990d64313" objectStore="Object_store"/>
+		<ee:transform doc:name="Transform Message" doc:id="e190cd41-0d16-49ca-b628-557f5d893fdb" >
+			<ee:message >
+				<ee:set-payload ><![CDATA[%dw 2.0
+output application/json
+indent=true
+---
+payload..]]></ee:set-payload>
+			</ee:message>
+		</ee:transform>
+		<logger level="INFO" doc:name="Logger" doc:id="9d049d0d-197d-4b93-a832-8c0a9a2e709d" />
+	</sub-flow>
+</mule>
