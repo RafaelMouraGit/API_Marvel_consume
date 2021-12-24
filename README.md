@@ -6,7 +6,7 @@
 </p>
 
 <p align="left">
-  🦄 Linguagens: <strong>Python e Java </strong>
+  🦄 Linguagens: <strong>Python e aprendendo Java </strong>
 </p>
 
 <p align="left">
